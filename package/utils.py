@@ -14,58 +14,6 @@ import numpy as np
 import sys
 import json
 
-
-def get_wavelength_calibration(wlc, wlc_sample, descriptions):
-    wlc_sample_norm = [None, None]
-
-    wl = [wlc[0][:,0], wlc[0][:,0]]
-
-    plt.figure('Calibration report')
-    plt.clf()
-    axes = [plt.subplot(211), plt.subplot(212)]
-
-    def get_shifted_sample(par):
-        wl_new = wl[0] + np.poly1d(par)(np.arange(len(wl[0])))
-        return (wl_new, np.interp(wl_new, wl[0], wlc_sample_norm[1]))
-
-    def fun_min(par):
-        wl_new, wlc_new = get_shifted_sample(par)
-        wl_range = [np.max([wl[0][0], wl_new[0]]), np.min([wl[0][-1], wl_new[-1]])]
-        return np.sum(np.abs([wlc_sample_norm[0][i] - wlc_new[i] for i,wl in enumerate(wl[0])]))
-
-    for i in [0,1]:
-        wlc_sample_norm[i] = wlc_sample[i][:,1]/wlc[i][:,1]
-
-    par0 = [0.0, 0.0]
-    out1 = minimize(fun_min, par0, method = 'Nelder-Mead', options = {'maxiter' : 10000, 'fatol': 1.0e-10} )
-
-    par1 = [0.0, 0.0] + list(out1.x)
-    par1[0] = 0.0
-    out = minimize(fun_min, par1, method = 'Nelder-Mead', options = {'maxiter' : 10000, 'fatol': 1.0e-15} )
-    
-    print (out)
-
-    wl_shifted, wlc_shifted = get_shifted_sample(out.x)
-    wl_range = [np.max([wl[0][0], wl_shifted[0]]), np.min([wl[0][-1], wl_shifted[-1]])]
-
-    axes[0].plot(wl[0], wlc_sample_norm[0], label = 'Normalized WLSc with ref sample (det {:})'.format(descriptions[0]))
-    axes[0].plot(wl[0], wlc_shifted, color='C1', linestyle='dashed', 
-    label = 'Calibrated normalized WLSc with ref sample  (det {:})'.format(descriptions[1]) )
-
-    axes[1].plot(wl[0], wlc_sample_norm[0] - wlc_sample_norm[1], label='before calibration')
-    axes[1].plot(wl[0], wlc_sample_norm[0] - wlc_shifted, label='after calibration')
-    
-    for ax in axes:
-        ax.set_xlim(wl_range)
-        ax.set_xlabel('Wavelength, nm')
-        ax.grid(True)
-        ax.legend()
-
-    axes[0].set_ylabel('Voltage, V')
-    axes[1].set_ylabel('Difference (det {:} - det {:}) voltage, V'.format(descriptions[0], descriptions[1]))
-    
-    return  {"polynomial" : list(out.x) }
-
 def print_carpet_view_header(fnames, spectra_per_acquisition, wavelength_axes):
     for i,fname in enumerate(fnames):
         with open(fname, 'w') as f: 

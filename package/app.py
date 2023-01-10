@@ -45,12 +45,15 @@ if not harpia:
 # =============================================================================
 # Parameters
 # =============================================================================
-settings = None
+settings = {}
 
 def load_settings():
     global settings
+    with open("./package/settings.json", "a+") as f:
+        pass
+
     with open("./package/settings.json", "r") as f:
-        settings = json.loads(f.read())
+        settings = json.loads(f.read() or "{}")
 
 def save_settings():
     global settings
@@ -62,10 +65,10 @@ load_settings()
 pumped_uncertainty = settings.get('pumped_uncertainty') or 0.15
 not_pumped_uncertainty = settings.get('not_pumped_uncertainty') or 0.15
 
-descriptions = settings.get('descriptions') or ["H", "V"]
+descriptions = settings.get('descriptions') or ["TA"]
 
-wlc = [None, None]
-wlc_sample = [None, None]
+wlc = [None]
+wlc_sample = [None]
 
 # =============================================================================
 #  Parameters - END
@@ -76,8 +79,8 @@ wlc_sample = [None, None]
 class Worker(QObject):    
     finished = pyqtSignal()
     progress = pyqtSignal(dict)
-    out_signal = [None, None]
-    out_bckg = [None, None]
+    out_signal = [None]
+    out_bckg = [None]
     
     def stop(self):
         self.is_running = False
@@ -89,14 +92,14 @@ class Worker(QObject):
 
         preset = harpia._get('/Basic/CurrentPreset')
 
-        if preset.get('IsMeasurementTA'):
+        if preset.get('IsMeasurementSWTA') or preset.get('IsMeasurementTA'):
             number_of_runs = preset.get('NumberOfRuns') or 1
             delays = preset.get('DelayTimes') or []
 
-            print_carpet_view_header(fnames, self.spectra_per_acquisition, [self.wavelength_axis, self.wavelength_axis2])
+            print_carpet_view_header(fnames, self.spectra_per_acquisition, [self.wavelength_axis])
 
             for irun in np.arange(number_of_runs):
-                harpia.set_delay_line_target_delay(preset['DelayTimes'][0])
+                harpia.harpiatb_set_delay_line_target_delay(preset['DelayTimes'][0])
 
                 self.measure_background()
 
@@ -104,7 +107,7 @@ class Worker(QObject):
                 for idelay, delay in enumerate(preset['DelayTimes']):
                     if not self.is_running:
                         break
-                    harpia.set_delay_line_target_delay(delay)
+                    harpia.harpiatb_set_delay_line_target_delay(delay)
                     info = self.measure_once()
                     if info is not None:
                         info['for_preset'] = True
@@ -145,21 +148,18 @@ class Worker(QObject):
         try:
             data = harpia.raw_signal()
             
-            out_signal=[get_pumped_notpumped(data['SpectrometerSignal'], average_in_place(data['PumpPhotodetectorSignal']), pumped_uncertainty, not_pumped_uncertainty),
-                        get_pumped_notpumped(data['AuxiliarySignal'], average_in_place(data['PumpPhotodetectorSignal']), pumped_uncertainty, not_pumped_uncertainty, wavelength_axis=self.wavelength_axis, wavelength_axis2=self.wavelength_axis2)]
-            out_bckg = [get_pumped_notpumped(self.data_bckg['SpectrometerSignal'], average_in_place(self.data_bckg['PumpPhotodetectorSignal']), pumped_uncertainty, not_pumped_uncertainty),
-                        get_pumped_notpumped(self.data_bckg['AuxiliarySignal'], average_in_place(self.data_bckg['PumpPhotodetectorSignal']), pumped_uncertainty, not_pumped_uncertainty, wavelength_axis=self.wavelength_axis, wavelength_axis2=self.wavelength_axis2)]
+            out_signal=[get_pumped_notpumped(data['SpectrometerSignal'], average_in_place(data['PumpPhotodetectorSignal'], length = self.datapoints_per_spectrum), pumped_uncertainty, not_pumped_uncertainty, datapoints_per_spectrum = self.datapoints_per_spectrum)]
+            out_bckg = [get_pumped_notpumped(self.data_bckg['SpectrometerSignal'], average_in_place(self.data_bckg['PumpPhotodetectorSignal'], length = self.datapoints_per_spectrum), pumped_uncertainty, not_pumped_uncertainty, datapoints_per_spectrum = self.datapoints_per_spectrum)]
                     
             return {
-                'delay': harpia.delay_line_actual_delay(),
+                'delay': harpia.harpiatb_delay_line_actual_delay(),
                 'out_signal': out_signal,
                 'out_bckg': out_bckg,
                 'number_of_spectra' : self.spectra_per_acquisition,
                 'pump_high' : np.max(data['PumpPhotodetectorSignal']),
-                'spectra' : [-1000.0 * np.log10((np.abs(out_signal[i]['pumped'] - out_bckg[i]['pumped'])/(out_signal[i]['not_pumped'] - out_bckg[i]['not_pumped']))) for i in [0,1]],
+                'spectra' : [-1000.0 * np.log10((np.abs(out_signal[i]['pumped'] - out_bckg[i]['pumped'])/(out_signal[i]['not_pumped'] - out_bckg[i]['not_pumped']))) for i in [0]],
                 #'spectra' : [np.random.randn(256), np.random.randn(256)],
                 'wavelength_axis' : self.wavelength_axis,
-                'wavelength_axis2' : self.wavelength_axis2,
                 'wavelength_range' : self.wavelength_range
                 }
             
@@ -179,11 +179,10 @@ class Worker(QObject):
         self.data_bckg = harpia.raw_signal()
         
         # measure pump-probe signals
-        harpia.open_all_shutters()
+        harpia.open_third_beam_shutter()
     
         # restore number of spectra per acquisition
         harpia.set_spectra_per_acquisition(self.spectra_per_acquisition)    
-
 
     def actions_before_measurement(self):
         # ensure chopper is started
@@ -196,15 +195,13 @@ class Worker(QObject):
 
         self.measure_background()
         
+        self.datapoints_per_spectrum = harpia.datapoints_per_spectrum()
         # total number of datapoints per channel
-        self.number_of_datapoints = self.spectra_per_acquisition * harpia.datapoints_per_spectrum()
+        self.number_of_datapoints = self.spectra_per_acquisition * self.datapoints_per_spectrum
         
         self.wavelength_axis = np.array(harpia.wavelength_axis())        
         
-        self.scale_wl_poly = settings['calibration']['polynomial']
-            
-        self.wavelength_axis2 = self.wavelength_axis + np.poly1d(self.scale_wl_poly)(np.arange(len(self.wavelength_axis)))
-        self.wavelength_range = [np.max([self.wavelength_axis2[0], self.wavelength_axis[0]]), np.min([self.wavelength_axis2[-1], self.wavelength_axis[-1]])]            
+        self.wavelength_range = [self.wavelength_axis.min() - 1, self.wavelength_axis.max() + 1]
         
     def actions_after_measurement(self):
         harpia.close_all_shutters()
@@ -222,21 +219,21 @@ class MplCanvas(FigureCanvasQTAgg):
                 
         plt.ion()
         
-        for i in [0,1]:
-            self.lines_wlc[i], = self.ax1.plot([],[])
-            self.lines_pp[i], = self.ax2.plot([],[])
+        for i in [0]:
+            self.lines_wlc[i], = self.ax1.plot([],[], '.-')
+            self.lines_pp[i], = self.ax2.plot([],[], '.-')
             
         self.ax1.set_title('WLSc spectrum')
-        self.ax1.set_xlabel('Wavelength (nm)')
+        self.ax1.set_xlabel('Delay (ps)')
         self.ax1.set_ylabel('Voltage (V)')
-        self.ax2.legend()
+        #self.ax2.legend()
         self.ax1.grid(True)        
     
         self.ax2.set_title('Pump-probe spectrum')
-        self.ax2.set_xlabel('Wavelength (nm)')
+        self.ax2.set_xlabel('Delay (ps)')
         self.ax2.set_ylabel('$\Delta A$ (mOD)')
         self.ax2.grid(True)
-        self.ax2.legend()
+        #self.ax2.legend()
         self.fig.tight_layout()
                 
         super(MplCanvas, self).__init__(self.fig)        
@@ -247,6 +244,7 @@ class MainWindow(QMainWindow):
     worker = None
     calibration_done = [False,False]
     working_directory = settings.get('working_directory') or r"C:\Users\Public\Desktop"
+    plot_data = {}
     
     def __init__(self, title):
         super().__init__()
@@ -263,7 +261,6 @@ class MainWindow(QMainWindow):
         
         self.measure_continuously_button = QPushButton('START/STOP\nCONTINUOUS ACQUISITION', self)
         self.measure_continuously_button.setToolTip('Start measuring')
-        # self.measure_continuously_button.setFixedHeight(75)
         self.measure_continuously_button.clicked.connect(self.measure_continuously_button_on_click)
                 
         self.measure_preset_button = QPushButton('START/STOP\nPRESET MEASUREMENT', self)
@@ -272,19 +269,6 @@ class MainWindow(QMainWindow):
         
         self.working_directory_line = QLineEdit()
         self.working_directory_line.setText(self.working_directory)
-        
-        self.wlc_no_sample_button = QPushButton('Measure WlSc without ref', self)
-        self.wlc_no_sample_button.setToolTip('Measure WLSc without reference sample')
-        self.wlc_no_sample_button.clicked.connect(self.wlc_no_sample_button_on_click)
-        
-        self.wlc_sample_button = QPushButton('Measure WlSc with ref', self)
-        self.wlc_sample_button.setToolTip('Measure WLSc with reference sample')
-        self.wlc_sample_button.clicked.connect(self.wlc_sample_button_on_click)
-        
-        self.wl_calibrate_button = QPushButton('CALIBRATE', self)
-        self.wl_calibrate_button.setToolTip('Calibrate wavelength axis')
-        # self.wl_calibrate_button.setEnabled(False)
-        self.wl_calibrate_button.clicked.connect(self.wl_calibrate_button_on_click)
         
         self.sc = [MplCanvas(self, width=6, height=3, dpi=100)]
 
@@ -297,27 +281,11 @@ class MainWindow(QMainWindow):
         presetLayout.addWidget(QLabel("Working directory:"))
         presetLayout.addWidget(self.working_directory_line)
         
-        calibrationLayout = QVBoxLayout()        
-        calibrationLayout.addWidget(self.wlc_no_sample_button)
-        calibrationLayout.addWidget(self.wlc_sample_button)
-        calibrationLayout.addWidget(self.wl_calibrate_button)
-        calibrationLayout.addStretch()
-        
-        calibrationGroupBox = QGroupBox("Wavelength axis calibration")
-        calibrationGroupBox.setFixedHeight(130)
-
         presetGroupBox = QGroupBox("Preset measurement")
-        
 
         topLayout.addWidget(self.measure_continuously_button, 1)
         topLayout.addWidget(presetGroupBox)
-        topLayout.addWidget(calibrationGroupBox)
         topLayout.addStretch()
-        # topLayout.addWidget(self.reset_button, 1)
-        # topLayout.addWidget(self.clear_button, 1)
-
-        calibrationGroupBox.setFlat(True)
-        calibrationGroupBox.setLayout(calibrationLayout)
         
         presetGroupBox.setFlat(True)
         presetGroupBox.setLayout(presetLayout)
@@ -339,7 +307,10 @@ class MainWindow(QMainWindow):
             if self.worker.is_running:
                 self.worker.is_running = False
                 return
-        
+
+        self.y_lims = [[0,-np.inf], [np.inf,-np.inf]]
+        self.plot_data = {}
+
         self.thread = QThread()
         self.worker = Worker()
         self.worker.moveToThread(self.thread)
@@ -349,8 +320,6 @@ class MainWindow(QMainWindow):
         self.thread.finished.connect(self.thread.deleteLater)
         self.worker.progress.connect(self.updatePlots)
         self.thread.start()
-        # Final resets       
-        # self.thread.finished.connect(self.addToPlots)
 
     def measure_preset_task(self):        
         if self.worker:
@@ -361,10 +330,13 @@ class MainWindow(QMainWindow):
         global fnames
         global descriptions
         timestamp = time.strftime('%Y%m%d_%H%M')
-        fnames = [os.path.join(self.working_directory_line.text(), timestamp+"_det" + descriptions[i] + ".dat") for i in [0,1]]
+        fnames = [os.path.join(self.working_directory_line.text(), timestamp + ".dat") for i in [0]]
 
         settings['working_directory'] = self.working_directory_line.text()
         save_settings()
+
+        self.plot_data = {}
+        self.y_lims = [[0,-np.inf], [np.inf,-np.inf]]
 
         self.thread = QThread()
         self.worker = Worker()
@@ -383,93 +355,67 @@ class MainWindow(QMainWindow):
             return()
         self.canDraw = False
         
+        delay = info["delay"]
         spectra = info['spectra']
         out_signal = info['out_signal']
         out_bckg = info['out_bckg']
         wavelength_axis = info['wavelength_axis']
-        wavelength_axis2 = info['wavelength_axis2']
         wavelength_range = info['wavelength_range']        
+
+        self.plot_data[delay] = (out_signal[0]['not_pumped'], spectra[0])
+
+        x = [delay for delay in self.plot_data]
+        y1 = [self.plot_data[item][0] for item in self.plot_data]
+        y2 = [self.plot_data[item][1] for item in self.plot_data]
+
+        y1_sorted = [y for _, y in sorted(zip(x, y1), key=lambda pair: pair[0])]
+        y2_sorted = [y for _, y in sorted(zip(x, y2), key=lambda pair: pair[0])]
+        x_sorted = sorted(x)
+
+        delay_range = [x_sorted[0] - 1, x_sorted[-1] + 1]
         
-        for i, _ in enumerate(out_signal):
-            self.sc[0].lines_wlc[i].set_xdata(wavelength_axis)
-            self.sc[0].lines_wlc[i].set_ydata(out_signal[i]['not_pumped'])                
+        self.sc[0].lines_wlc[0].set_xdata(x_sorted)
+        self.sc[0].lines_wlc[0].set_ydata(y1_sorted)
 
+        self.sc[0].lines_pp[0].set_xdata(x_sorted)
+        self.sc[0].lines_pp[0].set_ydata(y2_sorted)            
 
-            self.sc[0].lines_pp[i].set_xdata(wavelength_axis)
-            self.sc[0].lines_pp[i].set_ydata(spectra[i])            
+        self.sc[0].lines_pp[0].set_label('{:}, $T={:.2f}$ ps'.format(descriptions[0], info.get('delay') or 0.0))
+            
+        self.y_lims[0][0] = 0
+        if np.nanmax(y1_sorted) > self.y_lims[0][1]:
+            self.y_lims[0][1] = np.nanmax(y1_sorted)
+            
+        if np.nanmin(y2_sorted) < self.y_lims[1][0]:
+            self.y_lims[1][0] = np.nanmin(y2_sorted)
+        if np.nanmax(y2_sorted) > self.y_lims[1][1]:
+            self.y_lims[1][1] = np.nanmax(y2_sorted)
 
-            self.sc[0].lines_pp[i].set_label('{:}, $T={:.2f}$ ps'.format(descriptions[i], info.get('delay') or 0.0))
-            
-            
-        self.sc[0].ax1.set_xlim(wavelength_range)
-        self.sc[0].ax1.set_ylim([0, np.nanmax([np.nanmax(out_signal[0]['not_pumped']), np.nanmax(out_signal[1]['not_pumped'])])])
-        self.sc[0].ax1.legend()
-            
-        self.sc[0].ax2.set_xlim(wavelength_range)
-        self.sc[0].ax2.set_ylim([np.nanmin([np.nanmin(spectra[0]), np.nanmin(spectra[1])]),np.max([np.nanmax(spectra[0]), np.nanmax(spectra[1])])])
-        self.sc[0].ax2.legend()
+        try:
+            self.sc[0].ax1.set_xlim(delay_range)    
+            self.sc[0].ax1.set_ylim(self.y_lims[0])
+            #self.sc[0].ax1.legend()
+                
+            self.sc[0].ax2.set_xlim(delay_range)
+            self.sc[0].ax2.set_ylim(self.y_lims[1])
+            #self.sc[0].ax2.legend()
+        except ValueError:
+            pass
+
                 
         self.sc[0].draw()
         app.processEvents()
         self.canDraw = True
 
-    def measure_for_calibration(self,is_without_sample):
-        harpia.close_all_shutters()
-        harpia.open_probe_shutter()
-        
-        data = harpia.raw_signal()
-
-        harpia.close_all_shutters()
-
-        wl = np.array(harpia.wavelength_axis())
-        
-        fname_prefix = 'no_sample_' if is_without_sample else 'sample_'
-
-        wlc = [np.vstack((wl, average_in_range(data['SpectrometerSignal']))), np.vstack((wl,average_in_range(data['AuxiliarySignal'])))]
-        np.savetxt('./package/' + fname_prefix + '0_WLSc.txt', np.transpose(wlc[0]), delimiter='\t', header="Wavelength (nm)\tDetector signal (V)")
-        np.savetxt('./package/' + fname_prefix + '1_WLSc auxiliary.txt', np.transpose(wlc[1]), delimiter='\t', header="Wavelength (nm)\tDetector signal (V)")
-        
-    @pyqtSlot()
-    def wlc_no_sample_button_on_click(self):
-        self.measure_for_calibration(True)
-        self.calibration_done[0] = True
-        self.wl_calibrate_button.setEnabled(np.all(self.calibration_done))
-        pass
-    
-    @pyqtSlot()
-    def wlc_sample_button_on_click(self):
-        self.measure_for_calibration(False)
-        self.calibration_done[1] = True
-        self.wl_calibrate_button.setEnabled(np.all(self.calibration_done))
-        pass
-    
-    @pyqtSlot()
-    def wl_calibrate_button_on_click(self):
-        wlc = [np.loadtxt('./package/no_sample_0_WLSc.txt', skiprows=1, delimiter='\t'),np.loadtxt('./package/no_sample_1_WLSc auxiliary.txt', skiprows=1, delimiter='\t')]
-        wlc_sample = [np.loadtxt('./package/sample_0_WLSc.txt', skiprows=1, delimiter='\t'),np.loadtxt('./package/sample_1_WLSc auxiliary.txt', skiprows=1, delimiter='\t')]
-
-        calibration = get_wavelength_calibration(wlc, wlc_sample, descriptions)
-        settings['calibration'] = calibration
-        save_settings()
-        pass
-        
     @pyqtSlot()
     def measure_continuously_button_on_click(self):
-        # camera.enable_beam_profiler()
         self.measure_continuously_task()
 
     @pyqtSlot()
     def measure_preset_button_on_click(self):        
         self.measure_preset_task()
-
-    @pyqtSlot()
-    def reset_button_on_click(self):
-        pass
-        # camera.enable_beam_profiler()
-        # self.resetLongTask()
-        # self.disableButtons()
         
 app = QApplication([])
-w = MainWindow('HARPIA Dual detection')
+w = MainWindow('HARPIA-TB Pump-Probe Measurement')
 app.exec_()
         

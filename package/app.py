@@ -223,13 +223,13 @@ class MplCanvas(FigureCanvasQTAgg):
             self.lines_wlc[i], = self.ax1.plot([],[], '.-')
             self.lines_pp[i], = self.ax2.plot([],[], '.-')
             
-        self.ax1.set_title('WLSc spectrum')
+        self.ax1.set_title('Probe signal')
         self.ax1.set_xlabel('Delay (ps)')
         self.ax1.set_ylabel('Voltage (V)')
         #self.ax2.legend()
         self.ax1.grid(True)        
     
-        self.ax2.set_title('Pump-probe spectrum')
+        self.ax2.set_title('Pump-probe signal')
         self.ax2.set_xlabel('Delay (ps)')
         self.ax2.set_ylabel('$\Delta A$ (mOD)')
         self.ax2.grid(True)

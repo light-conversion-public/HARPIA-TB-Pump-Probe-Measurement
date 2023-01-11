@@ -1,5 +1,6 @@
 # HARPIA-TB Pump-Probe Measurement package
-Performs single-wavelength pump-probe measurement for HARPIA spectrometer, equiped with HARPIA-TB module.
+Performs single-wavelength pump-probe measurement for HARPIA spectrometer, 
+equiped with HARPIA-TB module.
 
 ## Requirements
  - Installed Light Conversion Launcher application. It is used to run this 
@@ -14,15 +15,19 @@ Performs single-wavelength pump-probe measurement for HARPIA spectrometer, equip
  - The 'HARPIA REST' should be indicated as connected at '127.0.0.1' under the
    'Required connections'. If not, check HARPIA Service App and choose 'Refresh'
    in 'Connections' tab
- - Run the HARPIA Dual Detection script using the Launcher application
+ - Run the HARPIA-TB Pump-Probe Measurement script using the Launcher application
    by clicking 'Start'
 
 ## Operation
+
 ### Continuous acquisition
-Click 'START/STOP CONTINUOUS ACQUISITION' to start/stop preview of the WLSc and 
+Click 'START/STOP CONTINUOUS ACQUISITION' to start/stop preview of the probe and 
 transient absorption signals.
 
 ### Preset measurement
-Configure and select a corresponding Single-Wavelength Transient Absorption measurement
+**IMPORTANT** Ensure that path in 'Working directory' field is correct and current
+user has sufficient permissions of writing in it.
+
+Configure and select a corresponding Transient Absorption measurement
 preset in HARPIA Service App. In script, click 'START/STOP PRESET MEASUREMENT'
-to start the measurement. One file (`YYYYYMMDD_HHmm.dat`) will be created in the folder, indacatd in 'Working directory` field.
+to start the measurement. One file (`YYYYYMMDD_HHmm.dat`) will be created in the folder, indicated in 'Working directory` field.

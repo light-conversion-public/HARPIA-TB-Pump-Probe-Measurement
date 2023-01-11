@@ -2,7 +2,7 @@
   "app_name": "HARPIA-TB Pump-Probe Measurement",
   "description": "Performs single-wavelength pump-probe measurement for HARPIA spectrometer, equiped with HARPIA-TB module.",
   "documentation_link": "README.md",
-  "version": "0.2",
+  "version": "1.0",
   "homepage": "https://github.com/light-conversion-public/HARPIA-TB-Pump-Probe-Measurement.git",
   "guid": "",
   "connections": [
